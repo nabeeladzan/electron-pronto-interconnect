@@ -1,0 +1,49 @@
+{
+  "name": "electron-pronto-interconnect",
+  "version": "1.0.0",
+  "description": "Instant React State Hooks for Electron",
+  "keywords": [
+    "electron",
+    "react"
+  ],
+  "license": "Apache-2.0",
+  "author": "Muhammad Nabeel Adzan",
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.6",
+    "typescript": "^5.8.3"
+  },
+  "peerDependencies": {
+    "electron": ">=24.0.0",
+    "react": ">=17.0.0"
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/manager.d.ts",
+      "default": "./dist/manager.js"
+    },
+    "./manager": {
+      "types": "./dist/manager.d.ts",
+      "default": "./dist/manager.js"
+    },
+    "./preload": {
+      "types": "./dist/preload.d.ts",
+      "default": "./dist/preload.js"
+    },
+    "./renderer": {
+      "types": "./dist/renderer.d.ts",
+      "default": "./dist/renderer.js"
+    }
+  }
+}
