@@ -1,7 +1,11 @@
 # Electron Pronto Interconnect
 
+![Static Badge](https://img.shields.io/badge/GitHub-Repo-blue?logo=gutgyv&link=https%3A%2F%2Fgithub.com%2Fnabeeladzan%2Felectron-pronto-interconnect)
+![NPM Downloads](https://img.shields.io/npm/dm/electron-pronto-interconnect)
 [![npm version](https://img.shields.io/npm/v/electron-pronto-interconnect.svg)](https://www.npmjs.com/package/electron-pronto-interconnect)
 [![License](https://img.shields.io/npm/l/electron-pronto-interconnect.svg)](LICENSE)
+
+[//]: # (breakline)
 Instant, synchronized React States for your Electron applications. Bridge the gap between your main process and renderer process with minimal setup and reactive state management.
 
 ## Why Electron Pronto Interconnect?
@@ -11,6 +15,7 @@ Managing state between Electron's main process and renderer process(es) can be c
 * **Easy State Exposure**: Expose variables from your main process with a simple function call.
 * **React Hooks**: Consume and update these variables in your React components using familiar hook patterns (`useState`-like).
 * **Two-way Synchronization**: Changes in the renderer are reflected in the main process, and changes in the main process are broadcast to all listening renderers.
+* **Promise-based RPC**: Securely expose main process functions and call them from the renderer with a clean async/await pattern.
 * **Type Safety**: Written in TypeScript to provide strong typing for your synchronized state.
 * **Minimal Boilerplate**: Focus on your application logic, not on IPC plumbing.
 
@@ -19,14 +24,18 @@ Managing state between Electron's main process and renderer process(es) can be c
 * Expose variables from the main process to multiple renderer windows.
 * Update main process variables from renderer components.
 * Programmatically update variables from the main process and notify all renderers.
+* Expose main process functions to be called from the renderer, returning a Promise with the result.
 * Customizable setter logic in the main process when a variable is updated.
 * `useIPC` and `useIPCState` React hooks for seamless state integration in renderer processes.
+* `errand` helper function for clean, `async/await` based function calls.
+* Optional verbose logging on a per-state or per-function basis for easier debugging.
 * Secure communication using Electron's `contextBridge` via a dedicated preload script.
 
 ## Prerequisites
 
-* Electron >= 25.3.0 (as per `package.json`, adjust if flexible)
-* React >= 18.2.0
+This package is designed for use with Electron applications that utilize React. It requires:
+* **Electron**: Version 24.0.0 or higher.
+* **React**: Version 17.0.0 or higher.
 
 ## Installation
 ```bash
@@ -34,6 +43,13 @@ npm install electron-pronto-interconnect
 ```
 
 ## How it Works
+
+This library provides two primary communication patterns:
+
+1. *State Synchronization*: You expose a variable from your main process. The renderer uses the useIPCState hook, which communicates with the main process to get the initial state and listen for updates. When you update the state using the hook's setter, the new value is sent to the main process.
+2. *Remote Procedure Call (RPC)*: You register a function in your main process. The renderer can then errand this function. This sends an invoke request to the main process and returns a Promise, allowing for a clean async/await workflow to get results back.
+
+Both patterns rely on a Preload Script to securely expose the necessary IPC communication functions (phaseSyncAPI) to the renderer process using Electron's contextBridge.
 
 1.  **Main Process**: You `expose` a variable from your Electron main process. This sets up IPC listeners for getting and setting this variable. You provide a setter function that dictates how the variable is updated in the main process's scope.
 2.  **Preload Script**: The package provides a preload script that securely exposes IPC communication functions (`phaseSyncAPI`) to the renderer process using Electron's `contextBridge`.
@@ -66,6 +82,15 @@ const mainProcessThemeSetter = (newTheme: 'light' | 'dark') => {
     // Add any other logic, like saving to a file or updating other main process state.
 };
 
+// --- RPC (Function Call) Example ---
+const openFile = async () => {
+    const { canceled, filePaths } = await dialog.showOpenDialog({});
+    if (canceled || filePaths.length === 0) {
+        return null; // Return null if the user cancels
+    }
+    return filePaths[0];
+};
+
 function createWindow() {
     const mainWindow = new BrowserWindow({
         width: 800,
@@ -83,6 +108,10 @@ function createWindow() {
     // 'mainProcessThemeSetter' is the callback to update it in the main process scope.
     expose<'light' | 'dark'>('theme', currentTheme, mainProcessThemeSetter);
 
+    // Register the 'open-file' function so the renderer can call it.
+    // This one will be silent by default.
+    register('open-file', openFile);
+    
     mainWindow.loadFile('index.html'); // Your renderer's HTML file
 
     // Example: Programmatically update the theme from the main process after 5 seconds
@@ -226,39 +255,98 @@ declare global {
 }
 ```
 
+### 4. Using RPC (Remote Procedure Call)
+In your renderer, you can call functions registered in the main process using the `errand` function:
+
+```tsx
+// src/components/FileManager.tsx
+import React, { useState } from 'react';
+import { errand } from 'electron-pronto-interconnect/renderer';
+
+function FileManager(): JSX.Element {
+    const [selectedFile, setSelectedFile] = useState<string | null>(null);
+    const [error, setError] = useState<string | null>(null);
+
+    const handleOpenFile = async () => {
+        try {
+            setError(null);
+            // Call the main process function and wait for the result
+            const filePath = await errand<string | null>('open-file');
+            
+            if (filePath) {
+                setSelectedFile(filePath);
+            } else {
+                // User cancelled the dialog
+                setSelectedFile('User cancelled.');
+            }
+        } catch (err) {
+            // This will catch errors if the function fails in the main process
+            console.error('Failed to open file dialog:', err);
+            setError('An error occurred while opening the file.');
+        }
+    };
+
+    return (
+        <div>
+            <button onClick={handleOpenFile}>Open a File</button>
+            {selectedFile && <p>Selected: <strong>{selectedFile}</strong></p>}
+            {error && <p style={{ color: 'red' }}>{error}</p>}
+        </div>
+    );
+}
+
+export default FileManager;
+```
+
 ## API Reference
 
 ### Main Process (`electron-pronto-interconnect/manager`)
 
-* **`expose<T>(variableName: string, initialValue: T, mainProcessSetter: (value: T) => void): void`**
-    * Exposes a variable for synchronization.
-    * `variableName`: Unique string identifier for the state.
-    * `initialValue`: The starting value of the variable.
-    * `mainProcessSetter`: A callback function that's executed in the main process when the variable's value is changed from a renderer or by `updateAndNotify`. This function is responsible for actually updating the variable in the main process's scope.
+-   **`expose<T>(variableName: string, initialValue: T, mainProcessSetter: (value: T) => void, options?: { verbose?: boolean }): void`**
 
-* **`updateAndNotify<T>(variableName: string, newValue: T): void`**
-    * Allows the main process to programmatically update an exposed variable and notify all listening renderers.
-    * `variableName`: The name of the variable to update.
-    * `newValue`: The new value for the variable. This will also trigger the `mainProcessSetter` defined during `expose`.
+    Exposes a variable for synchronization.
+
+    -   `variableName`: Unique string identifier for the state.
+    -   `initialValue`: The starting value of the variable.
+    -   `mainProcessSetter`: A callback function that's executed in the main process when the variable's value is changed from a renderer or by `updateAndNotify`. This function is responsible for actually updating the variable in the main process's scope.
+    -   `options?`: Optional. If `verbose` is `true`, logs GET/SET events for this variable to the console. Defaults to `false`.
+
+-   **`updateAndNotify<T>(variableName: string, newValue: T): void`**
+
+    Allows the main process to programmatically update an exposed variable and notify all listening renderers. Logging for this action is controlled by the `verbose` option set during the initial `expose`.
+
+-   **`register(functionName: string, handler: (...args: any[]) => any, options?: { verbose?: boolean }): void`**
+
+    Registers a main process function so it can be called from a renderer.
+
+    -   `functionName`: Unique string identifier for the function.
+    -   `handler`: The `async` or `sync` function to execute. Its return value will be sent back to the renderer.
+    -   `options?`: Optional. If `verbose` is `true`, logs when this function is called. Defaults to `false`.
 
 ### Preload (`electron-pronto-interconnect/preload`)
 
-* Exposes `window.phaseSync` to the renderer, with the following methods:
-    * `invoke<T>(channel: string, ...args: any[]): Promise<T>`
-    * `send(channel: string, ...args: any[]): void`
-    * `on<T = any>(channel: string, listener: (value: T) => void): () => void` (returns a cleanup function to remove the listener)
+-   Exposes `window.phaseSync` to the renderer, with the following methods:
+    -   `invoke<T>(channel: string, ...args: any[]): Promise<T>`
+    -   `send(channel: string, ...args: any[]): void`
+    -   `on<T = any>(channel: string, listener: (value: T) => void): () => void` (returns a cleanup function to remove the listener)
 
 ### Renderer (`electron-pronto-interconnect/renderer`)
 
-* **`useIPC<T>(variableName: string, initialClientValue?: T): [T | undefined, (newValue: T) => void]`**
-    * A React hook to synchronize with an Electron main process variable.
-    * Returns `undefined` until the value is fetched from the main process, or if `initialClientValue` is not provided.
-    * The setter function updates the state optimistically in the renderer and sends the new value to the main process.
+-   **`useIPC<T>(variableName: string, initialClientValue?: T): [T | undefined, (newValue: T) => void]`**
 
-* **`useIPCState<T>(variableName: string, defaultAndInitialValue: T): [T, (newValue: T) => void]`**
-    * A stricter version of `useIPC`.
-    * Requires a `defaultAndInitialValue` which is used as the initial state and as a fallback if the main process value is `undefined`.
-    * Guarantees the returned state is always of type `T`.
+    A React hook to synchronize with an Electron main process variable. Returns `undefined` until the value is fetched from the main process, or if `initialClientValue` is not provided. The setter function updates the state optimistically in the renderer and sends the new value to the main process.
+
+-   **`useIPCState<T>(variableName: string, defaultAndInitialValue: T): [T, (newValue: T) => void]`**
+
+    A stricter version of `useIPC`. Requires a `defaultAndInitialValue` which is used as the initial state and as a fallback if the main process value is `undefined`. Guarantees the returned state is always of type `T`.
+
+-   **`errand<T>(functionName: string, ...args: unknown[]): Promise<T>`**
+
+    Calls a function registered in the main process.
+
+    -   `functionName`: The name of the function to call.
+    -   `...args`: Any arguments to pass to the main process function.
+    -   Returns: A `Promise` that resolves with the value returned by the handler in the main process, or rejects if an error occurs.
 
 ## License
 
@@ -275,4 +363,4 @@ Contributions are welcome! Please feel free to submit a pull request or open an 
 
 ---
 
-Keywords: electron, react, ipc, state management, react hooks, typescript
+Keywords: electron, react, ipc, state management, react hooks, typescript, rpc, remote procedure call, main process, async

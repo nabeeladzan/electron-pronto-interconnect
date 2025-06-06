@@ -16,3 +16,10 @@ export declare function useIPC<T>(variableName: string, initialClientValue?: T):
  * and guarantees the returned state is always of type T (not T | undefined).
  */
 export declare function useIPCState<T>(variableName: string, defaultAndInitialValue: T): [T, (newValue: T) => void];
+/**
+ * Runs a registered function (an "errand") in the main process and returns its result.
+ * @param functionName The unique name of the function registered in the main process.
+ * @param args Any arguments to pass to the main process function.
+ * @returns A Promise that resolves with the return value from the main process function.
+ */
+export declare function errand<T>(functionName: string, ...args: unknown[]): Promise<T>;

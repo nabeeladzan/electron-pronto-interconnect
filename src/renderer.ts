@@ -109,3 +109,14 @@ export function useIPCState<T>(
 
     return [value, setIPCValue];
 }
+
+/**
+ * Runs a registered function (an "errand") in the main process and returns its result.
+ * @param functionName The unique name of the function registered in the main process.
+ * @param args Any arguments to pass to the main process function.
+ * @returns A Promise that resolves with the return value from the main process function.
+ */
+export function errand<T>(functionName: string, ...args: unknown[]): Promise<T> {
+    const channel = `ipc-errand-${functionName}`; // Use the matching channel prefix
+    return window.phaseSync.invoke<T>(channel, ...args);
+}

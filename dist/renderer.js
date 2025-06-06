@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.useIPC = useIPC;
 exports.useIPCState = useIPCState;
+exports.errand = errand;
 const react_1 = require("react");
 /**
  * A React hook to synchronize state with an Electron main process variable.
@@ -79,5 +80,15 @@ function useIPCState(variableName, defaultAndInitialValue) {
         window.phaseSync.send(`ipc-set-${variableName}`, newValue);
     }, [variableName]);
     return [value, setIPCValue];
+}
+/**
+ * Runs a registered function (an "errand") in the main process and returns its result.
+ * @param functionName The unique name of the function registered in the main process.
+ * @param args Any arguments to pass to the main process function.
+ * @returns A Promise that resolves with the return value from the main process function.
+ */
+function errand(functionName, ...args) {
+    const channel = `ipc-errand-${functionName}`; // Use the matching channel prefix
+    return window.phaseSync.invoke(channel, ...args);
 }
 //# sourceMappingURL=renderer.js.map
