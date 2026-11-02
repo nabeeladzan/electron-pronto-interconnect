@@ -33,12 +33,20 @@ function expose(variableName, initialValue, mainProcessSetter, options // Option
 ) {
     const verbose = options?.verbose ?? false;
     if (exposedState.has(variableName)) {
-        logger.warn(true, `[IPC State] Variable "${variableName}" is already exposed. Overwriting.`);
+        logger.warn(true, `[IPC State] Variable "${variableName}" is already exposed. Replacing the previous registration.`);
+        // Replace the previous handlers; re-registering would make ipcMain.handle
+        // throw "Attempted to register a second handler". This happens in practice
+        // when a window is recreated (e.g. macOS 'activate' or a dev-server reload).
+        electron_1.ipcMain.removeHandler(`ipc-get-${variableName}`);
+        electron_1.ipcMain.removeAllListeners(`ipc-set-${variableName}`);
     }
+    const previousEntry = exposedState.get(variableName);
     const variableEntry = {
         value: initialValue,
         mainProcessSetter,
-        listeners: new Set(),
+        // Keep existing subscribers across a re-expose so open windows keep
+        // receiving updates without having to GET again.
+        listeners: previousEntry?.listeners ?? new Set(),
         verbose, // Store the verbosity flag
     };
     exposedState.set(variableName, variableEntry);

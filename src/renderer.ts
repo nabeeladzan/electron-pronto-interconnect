@@ -1,4 +1,4 @@
-import {useCallback, useEffect, useState} from 'react';
+import {useCallback, useEffect, useRef, useState} from 'react';
 import {PhaseSync} from "./preload";
 
 declare global {
@@ -18,16 +18,21 @@ export function useIPC<T>(
     initialClientValue?: T
 ): [T | undefined, (newValue: T) => void] {
     const [value, setValue] = useState<T | undefined>(initialClientValue);
+    // Counts value changes applied since mount. A GET issued before such a
+    // change is stale by definition and must not overwrite the newer value.
+    const appliedUpdates = useRef(0);
 
     useEffect(() => {
         let isMounted = true; // Prevent state updates on unmounted component
+        const updatesAtRequest = appliedUpdates.current;
 
         // Fetch initial value from main process
         window.phaseSync.invoke<T>(`ipc-get-${variableName}`)
             .then(mainValue => {
-                if (isMounted) {
-                    setValue(mainValue);
+                if (!isMounted || appliedUpdates.current !== updatesAtRequest) {
+                    return; // A local set or a pushed update landed first.
                 }
+                setValue(mainValue);
             })
             .catch(err => {
                 console.error(`[useIPC] Error fetching initial value for "${variableName}":`, err);
@@ -39,6 +44,7 @@ export function useIPC<T>(
             `ipc-update-${variableName}`,
             (newValueFromMain) => {
                 if (isMounted) {
+                    appliedUpdates.current += 1;
                     setValue(newValueFromMain);
                 }
             }
@@ -52,6 +58,7 @@ export function useIPC<T>(
     }, [variableName]); // Re-run effect if variableName changes
 
     const setIPCValue = useCallback((newValue: T) => {
+        appliedUpdates.current += 1; // Invalidate a GET that is still in flight.
         setValue(newValue); // Optimistic update in renderer
         window.phaseSync.send(`ipc-set-${variableName}`, newValue);
     }, [variableName]);
@@ -68,19 +75,22 @@ export function useIPCState<T>(
     defaultAndInitialValue: T
 ): [T, (newValue: T) => void] {
     const [value, setValue] = useState<T>(defaultAndInitialValue);
+    const appliedUpdates = useRef(0);
 
     useEffect(() => {
         let isMounted = true;
+        const updatesAtRequest = appliedUpdates.current;
 
         window.phaseSync.invoke<T>(`ipc-get-${variableName}`)
             .then(mainValue => {
-                if (isMounted) {
-                    // If mainValue is undefined (e.g., not yet set in main or error),
-                    // it will keep the defaultAndInitialValue thanks to useState's initial value.
-                    // Only update if main process provides a non-undefined value different from initial.
-                    if (mainValue !== undefined) {
-                        setValue(mainValue);
-                    }
+                if (!isMounted || appliedUpdates.current !== updatesAtRequest) {
+                    return; // A local set or a pushed update landed first.
+                }
+                // If mainValue is undefined (e.g., not yet set in main or error),
+                // it will keep the defaultAndInitialValue thanks to useState's initial value.
+                // Only update if main process provides a non-undefined value different from initial.
+                if (mainValue !== undefined) {
+                    setValue(mainValue);
                 }
             })
             .catch(err => {
@@ -91,6 +101,7 @@ export function useIPCState<T>(
             `ipc-update-${variableName}`,
             (newValueFromMain) => {
                 if (isMounted) {
+                    appliedUpdates.current += 1;
                     setValue(newValueFromMain);
                 }
             }
@@ -100,9 +111,10 @@ export function useIPCState<T>(
             isMounted = false;
             removeUpdateListener();
         };
-    }, [variableName, defaultAndInitialValue]); // defaultAndInitialValue added to deps if it can change
+    }, [variableName]); // defaultAndInitialValue is only the initial state, so it is not a dependency
 
     const setIPCValue = useCallback((newValue: T) => {
+        appliedUpdates.current += 1; // Invalidate a GET that is still in flight.
         setValue(newValue);
         window.phaseSync.send(`ipc-set-${variableName}`, newValue);
     }, [variableName]);

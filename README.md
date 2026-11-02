@@ -65,10 +65,8 @@ In your Electron main process file (e.g., `main.ts` or `main.js`):
 
 ```typescript
 // main.ts
-import { app, BrowserWindow } from 'electron';
-import { expose, updateAndNotify } from 'electron-pronto-interconnect/manager';
-// If you only need 'expose', you can also use the default export:
-// import { expose } from 'electron-pronto-interconnect';
+import { app, BrowserWindow, dialog } from 'electron';
+import { expose, register, updateAndNotify } from 'electron-pronto-interconnect/manager';
 import path from 'path';
 
 // Example: Managing a global theme state
@@ -96,8 +94,8 @@ function createWindow() {
         width: 800,
         height: 600,
         webPreferences: {
-            // Crucial: Path to the preload script provided by this package
-            preload: path.join(__dirname, 'node_modules/electron-pronto-interconnect/dist/preload.js'),
+            // Your own preload script, which exposes phaseSync (see "Preload Script Setup" below)
+            preload: path.join(__dirname, 'preload.js'),
             contextIsolation: true, // Recommended for security
             nodeIntegration: false,  // Recommended for security
         }
@@ -136,11 +134,11 @@ app.on('window-all-closed', function () {
 });
 ```
 
-**Important Note for Preload Script:** Ensure the `preload` path in `webPreferences` correctly points to `node_modules/electron-pronto-interconnect/dist/preload.js`. You might need to adjust this path based on your project structure or if you're using a bundler that copies assets.
+**Important Note for the Preload Script:** `webPreferences.preload` must point at **your own compiled preload script**. The package's `dist/preload.js` only exports the bridge (`phaseSyncAPI`); it does not put anything on `window`. Exposing it yourself is also required under Electron's default `sandbox: true`, where a preload script cannot `require` local files unless your build bundles them.
 
-### 2. Preload Script Setup (User-Managed)
+### 2. Preload Script Setup
 
-`electron-pronto-interconnect` allows you to integrate its IPC bridge into your own custom Electron preload script. This gives you the flexibility to expose other APIs to your renderer process as needed.
+`electron-pronto-interconnect` lets you integrate its IPC bridge into your own custom Electron preload script. This gives you the flexibility to expose other APIs to your renderer process as needed.
 
 **Steps:**
 
@@ -150,7 +148,7 @@ app.on('window-all-closed', function () {
     ```typescript
     // In your project's preload.ts (e.g., src/preload.ts)
     import { contextBridge } from 'electron';
-    import { phaseSyncAPI, type PhaseSyncAPI } from 'electron-pronto-interconnect/preload'; // Import from our package
+    import { phaseSyncAPI, type PhaseSync } from 'electron-pronto-interconnect/preload'; // Import from our package
 
     // You can define other APIs you want to expose here
     const myCustomAPI = {
@@ -166,7 +164,7 @@ app.on('window-all-closed', function () {
 
     console.log('Preload script executed, phaseSync and myCustomAPI exposed.');
     ```
-    *(Ensure `PhaseSyncAPI` type is also exported from your package's `preload.ts` if users want to type their `window.phaseSync` object accurately, or they can define it themselves based on the `phaseSyncAPI` structure.)*
+    *(The `PhaseSync` type describes the exposed object; use it to type `window.phaseSync` in the renderer, as shown in step 3.)*
 
 2. **Configure Your `BrowserWindow`:**
     In your Electron main process file, ensure the `webPreferences.preload` option points to **your compiled preload script**.
@@ -325,12 +323,14 @@ export default FileManager;
 
 ### Preload (`electron-pronto-interconnect/preload`)
 
--   Exposes `window.phaseSync` to the renderer, with the following methods:
+-   Exports `phaseSyncAPI` (type `PhaseSync`) for you to expose as `window.phaseSync`. It bridges only this library's channels — `ipc-get-*`, `ipc-set-*`, `ipc-update-*`, `ipc-errand-*` — and throws for any other channel, so exposing it does not open the rest of your IPC surface to the page.
     -   `invoke<T>(channel: string, ...args: any[]): Promise<T>`
     -   `send(channel: string, ...args: any[]): void`
     -   `on<T = any>(channel: string, listener: (value: T) => void): () => void` (returns a cleanup function to remove the listener)
 
 ### Renderer (`electron-pronto-interconnect/renderer`)
+
+If the value was already changed locally, or pushed from the main process, while the initial `invoke` was still in flight, that response is discarded instead of overwriting the newer value.
 
 -   **`useIPC<T>(variableName: string, initialClientValue?: T): [T | undefined, (newValue: T) => void]`**
 
@@ -347,6 +347,16 @@ export default FileManager;
     -   `functionName`: The name of the function to call.
     -   `...args`: Any arguments to pass to the main process function.
     -   Returns: A `Promise` that resolves with the value returned by the handler in the main process, or rejects if an error occurs.
+
+## Development
+
+```bash
+npm install
+npm run build   # compile src/ -> dist/
+npm test        # build, then run the test suite
+```
+
+The tests run the compiled output against a stubbed `electron` module, so no Electron runtime is needed.
 
 ## License
 

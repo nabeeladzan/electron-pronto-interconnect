@@ -10,10 +10,14 @@
   "author": "Muhammad Nabeel Adzan",
   "scripts": {
     "build": "tsc",
+    "pretest": "npm run build",
+    "test": "node test/manager.test.cjs && node test/preload.test.cjs && node test/renderer.test.cjs",
     "prepublishOnly": "npm run build"
   },
   "devDependencies": {
     "@types/react": "^19.1.6",
+    "react": "^18.3.1",
+    "react-test-renderer": "^18.3.1",
     "typescript": "^5.8.3"
   },
   "peerDependencies": {
