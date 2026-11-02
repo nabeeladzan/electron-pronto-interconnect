@@ -8,11 +8,24 @@ const {expose, updateAndNotify, register} = require('../dist/manager.js');
 
 function makeWebContents() {
     const sent = [];
+    const listeners = new Map();
+
     return {
         sent,
         isDestroyed: () => false,
         send: (channel, value) => sent.push([channel, value]),
-        once: () => {},
+        once: (event, handler) => {
+            const handlers = listeners.get(event) ?? [];
+            handlers.push(handler);
+            listeners.set(event, handlers);
+        },
+        listenerCount: (event) => (listeners.get(event) ?? []).length,
+        destroy: () => {
+            for (const handler of listeners.get('destroyed') ?? []) {
+                handler();
+            }
+            listeners.clear();
+        },
     };
 }
 
@@ -77,4 +90,29 @@ test('register replaces an existing errand handler', async () => {
 
     const handler = electron.ipcMain.handlers.get('ipc-errand-ping');
     assert.equal(await handler({}), 'second');
+});
+
+test('reads from several variables attach only one destroyed listener per window', () => {
+    const webContents = makeWebContents();
+    expose('multi-a', 1, () => {});
+    expose('multi-b', 2, () => {});
+
+    electron.ipcMain.handlers.get('ipc-get-multi-a')({sender: webContents});
+    electron.ipcMain.handlers.get('ipc-get-multi-b')({sender: webContents});
+
+    assert.equal(webContents.listenerCount('destroyed'), 1);
+});
+
+test('a destroyed window is removed from every exposed variable', () => {
+    const webContents = makeWebContents();
+    expose('cleanup-a', 1, () => {});
+    expose('cleanup-b', 2, () => {});
+
+    electron.ipcMain.handlers.get('ipc-get-cleanup-a')({sender: webContents});
+    electron.ipcMain.handlers.get('ipc-get-cleanup-b')({sender: webContents});
+    webContents.destroy();
+
+    updateAndNotify('cleanup-a', 10);
+    updateAndNotify('cleanup-b', 20);
+    assert.deepEqual(webContents.sent, []);
 });

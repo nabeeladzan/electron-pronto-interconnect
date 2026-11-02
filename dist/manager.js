@@ -22,6 +22,17 @@ const logger = {
 };
 const exposedState = new Map();
 const registeredFunctions = new Map();
+// Windows that already have a 'destroyed' listener. One listener per window is
+// enough; attaching one per (window, variable) pair triggers
+// MaxListenersExceededWarning in apps with many exposed variables.
+const monitoredWindows = new Set();
+function handleWindowDestroyed(webContents) {
+    monitoredWindows.delete(webContents);
+    // Drop the window from every exposed variable's listener set.
+    exposedState.forEach((variableEntry) => {
+        variableEntry.listeners.delete(webContents);
+    });
+}
 /**
  * Exposes a variable from the main process to be used in renderer processes.
  * @param variableName The unique name for this variable.
@@ -57,10 +68,13 @@ function expose(variableName, initialValue, mainProcessSetter, options // Option
             logger.info(entry.verbose, `[IPC State] GET request for "${variableName}".`);
             const senderWebContents = event.sender;
             entry.listeners.add(senderWebContents);
-            // Clean up listener when the window is closed/destroyed
-            senderWebContents.once('destroyed', () => {
-                entry.listeners.delete(senderWebContents);
-            });
+            // Attach the cleanup listener at most once per window.
+            if (!monitoredWindows.has(senderWebContents)) {
+                monitoredWindows.add(senderWebContents);
+                senderWebContents.once('destroyed', () => {
+                    handleWindowDestroyed(senderWebContents);
+                });
+            }
             return entry.value;
         }
         logger.warn(true, `[IPC State] GET request for unexposed variable "${variableName}".`);
